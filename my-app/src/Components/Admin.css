@@ -1,0 +1,27 @@
+:root{--muted:#6b7280;--card:#fff;--accent:#0ea5a4}
+
+.admin-page{padding:28px}
+
+.admin-card{max-width:720px;margin:24px auto;padding:20px}
+
+.admin-form{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.admin-form label{display:flex;flex-direction:column;font-weight:600;color:#111}
+.admin-form input{padding:10px;border:1px solid #e6e9ef;border-radius:8px}
+
+.actions{margin-top:12px}
+
+.error{color:#b00020}
+
+.admin-panel{background:#fbfcfe;padding:16px;border-radius:8px;border:1px solid #eef2f7;margin-top:12px}
+
+.muted{color:var(--muted)}
+
+.btn.primary{background:var(--accent);color:rgb(11, 11, 11);border:none;padding:10px 14px;border-radius:8px}
+
+.btn{padding:8px 12px;border-radius:8px;border:1px solid #dbe6ea;background:green}
+
+.completed-control{display:flex;gap:8px;align-items:center}
+.completed-btn{background:var(--accent);color:#071014;border:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.05)}
+.completed-indicator{color:green;font-weight:600}
+
+.undo-btn{background:#fff;color:#071014;border:1px solid #e2e8f0;padding:6px 10px;border-radius:6px}

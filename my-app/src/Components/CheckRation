@@ -1,0 +1,84 @@
+import { useState } from "react";
+
+export default function CheckRation() {
+  const [cardNumber, setCardNumber] = useState("");
+  const [data, setData] = useState(null);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const checkCard = async () => {
+    setMessage("");
+    setLoading(true);
+    try {
+      const res = await fetch("http://localhost:5000/api/check-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cardNumber })
+      });
+
+      const result = await res.json();
+      if (res.ok) setData(result);
+      else setMessage(result.message || "Failed to find card");
+    } catch (err) {
+      setMessage(err.message || "Server error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const issueRation = async () => {
+    if (!data) return;
+    setMessage("");
+    setLoading(true);
+    try {
+      const res = await fetch("http://localhost:5000/api/issue-ration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cardNumber: data.cardNumber,
+          products: data.products
+        })
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.message || "Issuing failed");
+      setMessage(result.message || "Ration issued successfully");
+      setData(null);
+    } catch (err) {
+      setMessage(err.message || "Server error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        placeholder="Enter Card Number"
+        value={cardNumber}
+        onChange={e => setCardNumber(e.target.value)}
+      />
+      <button onClick={checkCard} disabled={loading || !cardNumber.trim()}>
+        {loading ? "Checking…" : "Check"}
+      </button>
+
+      {data && (
+        <>
+          <h3>{data.holderName}</h3>
+          <ul>
+            {data.products.map((p, i) => (
+              <li key={i}>
+                {p.name} – {p.quantity} {p.unit}
+              </li>
+            ))}
+          </ul>
+          <button onClick={issueRation} disabled={loading}>
+            {loading ? "Processing…" : "Register / Issue"}
+          </button>
+        </>
+      )}
+
+      {message && <p>{message}</p>}
+    </div>
+  );
+}
