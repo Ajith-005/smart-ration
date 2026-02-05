@@ -9,6 +9,7 @@ export default function Admin() {
   const [distributions, setDistributions] = useState([]);
   const [loadingDist, setLoadingDist] = useState(false);
   const [pendingCompletes, setPendingCompletes] = useState([]);
+  const [expandedItems, setExpandedItems] = useState({});
 
   const apiBase = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
@@ -43,7 +44,9 @@ export default function Admin() {
 
   const markCompleted = async (id) => {
     setError("");
+    // optimistic update: mark locally immediately
     setPendingCompletes(prev => [...prev, id]);
+    setDistributions(prev => prev.map(d => (d.id === id ? { ...d, completed: true } : d)));
     try {
       const token = localStorage.getItem('admin_token');
       if (!token) throw new Error('Unauthorized');
@@ -52,8 +55,11 @@ export default function Admin() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to mark completed');
-      setDistributions(prev => prev.map(d => (d.id === id ? { ...d, completed: true } : d)));
+      if (!res.ok) {
+        // revert local change
+        setDistributions(prev => prev.map(d => (d.id === id ? { ...d, completed: false } : d)));
+        throw new Error(data.message || 'Failed to mark completed');
+      }
     } catch (err) {
       setError(err.message || 'Failed to mark completed');
     } finally {
@@ -63,7 +69,9 @@ export default function Admin() {
 
   const unmarkCompleted = async (id) => {
     setError("");
+    // optimistic update: unmark locally immediately
     setPendingCompletes(prev => [...prev, id]);
+    setDistributions(prev => prev.map(d => (d.id === id ? { ...d, completed: false } : d)));
     try {
       const token = localStorage.getItem('admin_token');
       if (!token) throw new Error('Unauthorized');
@@ -72,8 +80,11 @@ export default function Admin() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to unmark completed');
-      setDistributions(prev => prev.map(d => (d.id === id ? { ...d, completed: false } : d)));
+      if (!res.ok) {
+        // revert local change
+        setDistributions(prev => prev.map(d => (d.id === id ? { ...d, completed: true } : d)));
+        throw new Error(data.message || 'Failed to unmark completed');
+      }
     } catch (err) {
       setError(err.message || 'Failed to unmark completed');
     } finally {
@@ -174,52 +185,62 @@ export default function Admin() {
               ) : distributions.length === 0 ? (
                 <p className="muted">No distributions found.</p>
               ) : (
-                <ul style={{ listStyle: "none", padding: 0 }}>
-                  {distributions.map((d, i) => (
-                    <li key={d.id || i} style={{ background: "#fff", padding: 12, borderRadius: 8, marginBottom: 10, border: "1px solid #eef2f7" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <div>
-                          <div><strong>Card:</strong> {d.cardNumber}</div>
-                          <div className="muted"><strong>Month:</strong> {d.month}</div>
+                <ul className="blog-list">
+                  {distributions.map((d, i) => {
+                    const keyId = d.id ?? `idx-${i}`;
+                    const expanded = !!expandedItems[keyId];
+                    return (
+                      <li key={d.id || i} className={`blog-item ${expanded ? 'expanded' : ''}`}>
+                        <div className="blog-header" onClick={() => setExpandedItems(prev => ({ ...prev, [keyId]: !prev[keyId] }))}>
+                          <div>
+                            <div><strong>Card:</strong> {d.cardNumber}</div>
+                            <div className="muted"><strong>Month:</strong> {d.month}</div>
+                          </div>
+                          <div className="header-right">
+                            <div className="muted small-time">{new Date(d.issuedAt).toLocaleString()}</div>
+                            <div className={`chev ${expanded ? 'open' : ''}`}>▾</div>
+                          </div>
                         </div>
-                        <div className="muted">
-                          <div>{new Date(d.issuedAt).toLocaleString()}</div>
-                        </div>
-                      </div>
-                      <div style={{ marginTop: 8 }}>
-                        <strong>Products:</strong>
-                        <ul>
-                          {(d.products || []).map((p, idx) => (
-                            <li key={idx}>{p.productName || p.name} — {p.quantity}</li>
-                          ))}
-                        </ul>
 
-                        <div className="completed-control" style={{ marginTop: 8 }}>
-                          {d.completed ? (
-                            <>
-                              <span className="completed-indicator">✔️ Completed</span>
-                              <button
-                                className="btn undo-btn"
-                                onClick={() => unmarkCompleted(d.id)}
-                                disabled={pendingCompletes.includes(d.id)}
-                                style={{ marginLeft: 8 }}
-                              >
-                                {pendingCompletes.includes(d.id) ? 'Processing…' : 'Undo'}
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              className="btn completed-btn"
-                              onClick={() => markCompleted(d.id)}
-                              disabled={pendingCompletes.includes(d.id)}
-                            >
-                              {pendingCompletes.includes(d.id) ? 'Processing…' : 'Completed'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
+                        {expanded && (
+                          <div className="blog-body">
+                            <div>
+                              <strong>Products:</strong>
+                              <ul>
+                                {(d.products || []).map((p, idx) => (
+                                  <li key={idx}>{p.productName || p.name} — {p.quantity}</li>
+                                ))}
+                              </ul>
+                            </div>
+
+                            <div className="completed-control" style={{ marginTop: 8 }}>
+                              {d.completed ? (
+                                <>
+                                  <span className="completed-indicator">✔️ Completed</span>
+                                  <button
+                                    className="btn undo-btn"
+                                    onClick={() => unmarkCompleted(d.id)}
+                                    disabled={pendingCompletes.includes(d.id)}
+                                    style={{ marginLeft: 8 }}
+                                  >
+                                    {pendingCompletes.includes(d.id) ? 'Processing…' : 'Undo'}
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  className="btn completed-btn"
+                                  onClick={() => markCompleted(d.id)}
+                                  disabled={pendingCompletes.includes(d.id)}
+                                >
+                                  {pendingCompletes.includes(d.id) ? 'Processing…' : 'Completed'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

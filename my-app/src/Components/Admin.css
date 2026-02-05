@@ -25,3 +25,20 @@
 .completed-indicator{color:green;font-weight:600}
 
 .undo-btn{background:#fff;color:#071014;border:1px solid #e2e8f0;padding:6px 10px;border-radius:6px}
+
+/* Blog-like list styles */
+.blog-list{list-style:none;padding:0;margin:0}
+.blog-item{background:var(--card);padding:12px;border-radius:8px;margin-bottom:12px;border:1px solid #eef2f7;box-shadow:0 1px 0 rgba(16,24,40,0.02)}
+.blog-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.blog-header div{display:flex;flex-direction:column}
+.header-right{display:flex;align-items:center;gap:12px}
+.small-time{font-size:0.85rem}
+.chev{transition:transform 0.18s ease;color:var(--muted);font-weight:700}
+.chev.open{transform:rotate(-180deg)}
+.blog-body{margin-top:10px;padding-top:10px;border-top:1px dashed #eef2f7}
+
+/* Slight hover for header - avoid layout shift by not changing padding */
+.blog-header{padding:6px 0}
+.blog-header:hover{background:rgba(14,165,164,0.04);border-radius:6px;box-shadow:0 2px 8px rgba(14,165,164,0.04);}
+
+.blog-item.expanded .chev{transform:rotate(-180deg)}

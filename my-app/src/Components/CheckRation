@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+
 export default function CheckRation() {
   const [cardNumber, setCardNumber] = useState("");
   const [data, setData] = useState(null);
@@ -10,7 +12,7 @@ export default function CheckRation() {
     setMessage("");
     setLoading(true);
     try {
-      const res = await fetch("http://localhost:5000/api/check-card", {
+      const res = await fetch(`${API_BASE}/api/check-card`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cardNumber })
@@ -31,7 +33,7 @@ export default function CheckRation() {
     setMessage("");
     setLoading(true);
     try {
-      const res = await fetch("http://localhost:5000/api/issue-ration", {
+      const res = await fetch(`${API_BASE}/api/issue-ration`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

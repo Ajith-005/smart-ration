@@ -1,6 +1,8 @@
 import { useState } from "react";
 import "./Home.css";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+
 export default function Home() {
   const [cardNumber, setCardNumber] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,10 +22,8 @@ export default function Home() {
 
     try {
       const res = await fetch(
-  `https://smart-ration-backend.onrender.com/api/ration/search/${encodeURIComponent(
-    cardNumber.trim()
-  )}`
-);
+        `${API_BASE}/api/ration/search/${encodeURIComponent(cardNumber.trim())}`
+      );
       const result = await res.json();
 
       if (!res.ok) {
@@ -45,17 +45,14 @@ export default function Home() {
     setSuccess("");
 
     try {
-      const res = await fetch(
-  "https://smart-ration-backend.onrender.com/api/issue-ration",
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      cardNumber: data.cardNumber,
-      products: data.products
-    }),
-  }
-);
+      const res = await fetch(`${API_BASE}/api/issue-ration`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cardNumber: data.cardNumber,
+          products: data.products,
+        }),
+      });
       const result = await res.json();
       if (!res.ok) throw new Error(result.message || "Issuing failed");
       setSuccess(result.message || "Ration registered successfully");
