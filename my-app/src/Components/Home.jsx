@@ -20,10 +20,10 @@ export default function Home() {
 
     try {
       const res = await fetch(
-        `http://localhost:5000/api/ration/search/${encodeURIComponent(
-          cardNumber.trim()
-        )}`
-      );
+  `https://smart-ration-backend.onrender.com/api/ration/search/${encodeURIComponent(
+    cardNumber.trim()
+  )}`
+);
       const result = await res.json();
 
       if (!res.ok) {
@@ -45,11 +45,17 @@ export default function Home() {
     setSuccess("");
 
     try {
-      const res = await fetch("http://localhost:5000/api/issue-ration", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cardNumber: data.cardNumber, products: data.products }),
-      });
+      const res = await fetch(
+  "https://smart-ration-backend.onrender.com/api/issue-ration",
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      cardNumber: data.cardNumber,
+      products: data.products
+    }),
+  }
+);
       const result = await res.json();
       if (!res.ok) throw new Error(result.message || "Issuing failed");
       setSuccess(result.message || "Ration registered successfully");

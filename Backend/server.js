@@ -17,7 +17,10 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin@123";
 const JWT_SECRET = process.env.JWT_SECRET || "change_this_secret";
 
 // MongoDB connection
-const url = process.env.MONGO_URL;
+const url = process.env.MONGO_URL || "mongodb://127.0.0.1:27017";
+if (!process.env.MONGO_URL) {
+  console.warn("MONGO_URL not set — using fallback:", url);
+}
 const client = new MongoClient(url);
 let db;
 
