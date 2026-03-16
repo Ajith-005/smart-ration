@@ -1,0 +1,32 @@
+.otp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+.otp-modal {
+  background: #fff;
+  width: 380px;
+  max-width: 92%;
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+.otp-modal-header {
+  display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #eee;
+}
+.otp-modal-body { padding:16px; }
+.otp-desc { margin:0 0 10px; color:#333; }
+.otp-phone-input, .otp-code-input { width:100%; padding:10px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; }
+.otp-actions { margin-top:12px; display:flex; gap:10px; justify-content:flex-end; }
+.btn { padding:8px 12px; border-radius:6px; border:0; cursor:pointer; }
+.btn-primary { background:#0b5fff; color:#fff; }
+.btn-secondary { background:#f0f0f0; color:#333; }
+.btn-link { background:transparent; color:#0b5fff; padding:6px 8px; border-radius:6px; border:0; cursor:pointer; }
+.otp-resend { margin-top:8px; display:flex; justify-content:flex-end; }
+.otp-error { margin-top:10px; color:#b00020; }
+.otp-info  { margin-top:10px; color:#0b5fff; }
+.otp-close { background:transparent; border:0; font-size:18px; cursor:pointer; }
