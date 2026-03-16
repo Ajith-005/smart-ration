@@ -82,6 +82,15 @@ app.get("/api/ration/search/:cardNumber", async (req, res) => {
   }
 });
 
+app.get("/api/debug", async (req, res) => {
+  try {
+    const all = await db.collection("rationcards").find().toArray();
+    res.json({ count: all.length, cards: all.map(c => c.cardNumber) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Check ration card and get products
 app.post("/api/check-card", async (req, res) => {
   const { cardNumber } = req.body;
