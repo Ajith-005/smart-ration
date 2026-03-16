@@ -5,7 +5,6 @@ const PhoneInput = ({ value, onChange }) => (
   <input
     className="otp-phone-input"
     type="tel"
-    inputMode="numeric"
     placeholder="e.g. +60123456789"
     value={value}
     onChange={(e) => onChange(e.target.value)}
@@ -96,7 +95,7 @@ export default function OtpModal({ open, onClose, apiBase, cardNumber, onVerifie
           {step === 'otp' && (
             <>
               <p className="otp-desc">Enter the 6-digit code sent to <strong>{phone}</strong></p>
-              <input className="otp-code-input" type="text" inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} />
+              <input className="otp-code-input" type="text" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} />
               <div className="otp-actions">
                 <button className="btn btn-secondary" onClick={() => setStep('phone')}>Back</button>
                 <button className="btn btn-primary" onClick={() => verifyOtp(false)} disabled={loading}>{loading ? 'Verifying…' : 'Verify'}</button>

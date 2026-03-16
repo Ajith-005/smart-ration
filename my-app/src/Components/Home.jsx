@@ -136,9 +136,7 @@ export default function Home() {
                     id="cardNumber"
                     className="search-input"
                     type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    placeholder="e.g. 1234567890"
+                    placeholder="e.g. RC2006 or 1234567890"
                     value={cardNumber}
                     onChange={(e) => setCardNumber(e.target.value)}
                     onKeyDown={handleKey}
