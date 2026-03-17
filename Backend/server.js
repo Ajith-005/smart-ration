@@ -355,20 +355,18 @@ app.post('/api/contact', async (req, res) => {
   const textBody   = `Name: ${name}\nEmail: ${email}\nPhone: ${phone||'-'}\nTopic: ${topic}\n\n${message}`;
   const subject    = `[Contact] ${topic} — ${name}`;
 
-  // 1. Try SMTP
-  if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+  // 1. Try Gmail (service mode — works on Render, bypasses port blocking)
+  if (SMTP_USER && SMTP_PASS) {
     try {
       const transporter = nodemailer.createTransport({
-        host: SMTP_HOST,
-        port: SMTP_PORT,
-        secure: SMTP_PORT === 465,
+        service: 'gmail',
         auth: { user: SMTP_USER, pass: SMTP_PASS }
       });
       await transporter.sendMail({ from: SMTP_USER, to: MAIL_TO, replyTo: email, subject, text: textBody, html: htmlBody });
-      console.log('✅ Contact email sent via SMTP');
+      console.log('✅ Contact email sent via Gmail');
       return res.json({ message: 'Message sent' });
     } catch (err) {
-      console.error('SMTP failed:', err.message);
+      console.error('Gmail failed:', err.message);
       // fall through to MongoDB
     }
   }
