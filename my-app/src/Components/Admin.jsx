@@ -22,8 +22,7 @@ const IcoBox       = (p) => <Icon {...p} d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0
 const IcoClock     = (p) => <Icon {...p} d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zM12 6v6l4 2" />;
 const IcoChevDown  = (p) => <Icon {...p} d="M6 9l6 6 6-6" />;
 
-const apiBase = import.meta.env.VITE_API_BASE || "http://localhost:5000";
-
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000'
 
 export default function Admin() {
   const [email, setEmail]               = useState("");
@@ -303,7 +302,7 @@ export default function Admin() {
             <IcoList size={16} /> Distributions
           </button>
           <button className={`sidebar-link ${activeTab === 'beneficiaries' ? 'active' : ''}`} onClick={() => setActiveTab('beneficiaries')}>
-            <IcoUsers size={16} /> Beneficiaries
+            <IcoUsers size={16} /> Add New user
           </button>
           <button className={`sidebar-link ${activeTab === 'products' ? 'active' : ''}`} onClick={() => setActiveTab('products')}>
             <IcoBox size={16} /> Products
