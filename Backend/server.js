@@ -89,7 +89,7 @@ async function sendEmailBrevo({ to, replyTo, subject, textBody, htmlBody }) {
   const apiKey = process.env.BREVO_API_KEY;
   if (!apiKey) return { success: false, error: 'BREVO_API_KEY not set' };
 
-  const senderEmail = 'a53de1001@smtp-brevo.com';  // ← add this line
+  const senderEmail = 'harasubikarthi@gmail.com';  // ← add this line
 
   const payload = {
     sender:   { name: 'Smart Ration', email: senderEmail },
