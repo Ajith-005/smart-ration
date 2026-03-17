@@ -172,11 +172,18 @@ export default function Admin() {
     e.preventDefault(); setError("");
     try {
       const res  = await fetch(`${API_BASE}/api/admin/login`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Login failed");
+
+      // read raw text then try parse for clearer diagnostics
+      const raw = await res.text();
+      let data;
+      try { data = JSON.parse(raw); } catch (_) { data = { message: raw }; }
+      console.log('Admin login response:', res.status, data);
+      if (!res.ok) throw new Error(data.message || `Login failed (status ${res.status})`);
+
       localStorage.setItem("admin_token", data.token);
       setAuthenticated(true); setEmail(""); setPassword("");
     } catch (err) { setError(err.message); }
