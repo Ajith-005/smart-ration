@@ -19,11 +19,11 @@ const ALLOWED_ORIGINS = rawAllowed.split(',').map(s => s.trim()).filter(Boolean)
 const corsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (curl, server-to-server)
-    if (!origin) return callback(null, true);
-    // Allow configured origins
-    if (ALLOWED_ORIGINS.indexOf(origin) !== -1) return callback(null, true);
-    // Allow localhost during development automatically
-    if (origin.startsWith('http://localhost') || origin.startsWith('https://localhost')) return callback(null, true);
+      if (!origin) return callback(null, true);
+      // Allow configured origins
+      if (ALLOWED_ORIGINS.indexOf(origin) !== -1) return callback(null, true);
+      // Allow localhost only during development
+      if (process.env.NODE_ENV === 'development' && (origin.startsWith('http://localhost') || origin.startsWith('https://localhost'))) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -35,8 +35,11 @@ app.options('*', cors(corsOptions));
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && (ALLOWED_ORIGINS.indexOf(origin) !== -1 || origin.startsWith('http://localhost') || origin.startsWith('https://localhost'))) {
-    res.header('Access-Control-Allow-Origin', origin);
+  if (origin) {
+    const allowLocal = process.env.NODE_ENV === 'development' && (origin.startsWith('http://localhost') || origin.startsWith('https://localhost'));
+    if (ALLOWED_ORIGINS.indexOf(origin) !== -1 || allowLocal) {
+      res.header('Access-Control-Allow-Origin', origin);
+    }
   }
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
