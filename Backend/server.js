@@ -12,7 +12,15 @@ const twilioLib = require('twilio');
 const app = express();
 
 // Middleware
-app.use(cors());
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'https://smart-ration-two.vercel.app';
+app.use(cors({ origin: FRONTEND_ORIGIN, methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
+app.options('*', cors());
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  next();
+});
 app.use(express.json());
 
 // Admin credentials & JWT secret from env (with safe defaults)
