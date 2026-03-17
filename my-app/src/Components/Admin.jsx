@@ -171,7 +171,7 @@ export default function Admin() {
   const handleLogin = async (e) => {
     e.preventDefault(); setError("");
     try {
-      const res  = await fetch(`${apiBase}/api/admin/login`, {
+      const res  = await fetch(`${API_BASE}/api/admin/login`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),
       });
