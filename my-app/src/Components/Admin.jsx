@@ -51,7 +51,7 @@ export default function Admin() {
     if (!token) return;
     setLoadingDist(true); setError("");
     try {
-      const res  = await fetch(`${apiBase}/api/distributions`, {
+      const res  = await fetch(`${API_BASE}/api/distributions`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -68,7 +68,7 @@ export default function Admin() {
     setDistributions(p => p.map(d => d.id === id ? { ...d, completed: true } : d));
     try {
       const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${apiBase}/api/distributions/${id}/complete`, {
+      const res = await fetch(`${API_BASE}/api/distributions/${id}/complete`, {
         method: "PATCH", headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -84,7 +84,7 @@ export default function Admin() {
     setDistributions(p => p.map(d => d.id === id ? { ...d, completed: false } : d));
     try {
       const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${apiBase}/api/distributions/${id}/uncomplete`, {
+      const res = await fetch(`${API_BASE}/api/distributions/${id}/uncomplete`, {
         method: "PATCH", headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -104,7 +104,7 @@ export default function Admin() {
     if (!token) return;
     setLoadingProducts(true); setError("");
     try {
-      const res = await fetch(`${apiBase}/api/products`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/products`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to load products');
       setProducts(data);
@@ -121,7 +121,7 @@ export default function Admin() {
     if (!token) return;
     setError('');
     try {
-      const res = await fetch(`${apiBase}/api/products`, {
+      const res = await fetch(`${API_BASE}/api/products`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(newProduct)
       });
@@ -138,7 +138,7 @@ export default function Admin() {
     if (!token) return;
     setError("");
     try {
-      const res = await fetch(`${apiBase}/api/products/${productId}/shops`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/products/${productId}/shops`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to load shops');
       setProductShops(data.map(s => ({ ...s })));
@@ -156,7 +156,7 @@ export default function Admin() {
     if (!token) return;
     setSavingShop(shopId);
     try {
-      const res = await fetch(`${apiBase}/api/shops/${shopId}/products/${productId}`, {
+      const res = await fetch(`${API_BASE}/api/shops/${shopId}/products/${productId}`, {
         method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type':'application/json' },
         body: JSON.stringify(updates)
       });
