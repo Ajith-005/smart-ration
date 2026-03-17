@@ -11,53 +11,49 @@ const twilioLib = require('twilio');
 
 const app = express();
 
-// Middleware
-// FRONTEND_ORIGIN may be a single origin or a comma-separated list (for dev+prod)
+// ─────────────────────────────────────────
+// CORS — permanent, stable solution
+// Allows: production Vercel URL + any localhost port (always, no NODE_ENV check)
+// To add more origins, comma-separate them in FRONTEND_ORIGIN env var:
+//   FRONTEND_ORIGIN=https://smart-ration-two.vercel.app,https://staging.vercel.app
+// ─────────────────────────────────────────
 const rawAllowed = process.env.FRONTEND_ORIGIN || 'https://smart-ration-two.vercel.app';
 const ALLOWED_ORIGINS = rawAllowed.split(',').map(s => s.trim()).filter(Boolean);
 
-const corsOptions = {
+app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (curl, server-to-server)
-      if (!origin) return callback(null, true);
-      // Allow configured origins
-      if (ALLOWED_ORIGINS.indexOf(origin) !== -1) return callback(null, true);
-      // Allow localhost only during development
-      if (process.env.NODE_ENV === 'development' && (origin.startsWith('http://localhost') || origin.startsWith('https://localhost'))) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+    // No origin = curl / server-to-server / Postman — always allow
+    if (!origin) return callback(null, true);
+    // Allow any configured production origin
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    // Always allow localhost on any port — for local dev without NODE_ENV tricks
+    if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return callback(null, true);
+    if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return callback(null, true);
+    return callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
-
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin) {
-    const allowLocal = process.env.NODE_ENV === 'development' && (origin.startsWith('http://localhost') || origin.startsWith('https://localhost'));
-    if (ALLOWED_ORIGINS.indexOf(origin) !== -1 || allowLocal) {
-      res.header('Access-Control-Allow-Origin', origin);
-    }
-  }
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  next();
-});
+// Handle preflight for all routes
+app.options('*', cors());
 
 app.use(express.json());
 
-// Admin credentials & JWT secret from env (with safe defaults)
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@example.com";
+// ─────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────
+const ADMIN_EMAIL    = process.env.ADMIN_EMAIL    || "admin@example.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin@123";
-const JWT_SECRET = process.env.JWT_SECRET || "change_this_secret";
+const JWT_SECRET     = process.env.JWT_SECRET     || "change_this_secret";
 
-// MongoDB connection
+// ─────────────────────────────────────────
+// MongoDB
+// ─────────────────────────────────────────
 const url = process.env.MONGO_URL || "mongodb://127.0.0.1:27017";
-if (!process.env.MONGO_URL) {
-  console.warn("MONGO_URL not set — using fallback:", url);
-}
+if (!process.env.MONGO_URL) console.warn("⚠️  MONGO_URL not set — using local fallback");
+
 const client = new MongoClient(url);
 let db;
 
@@ -66,50 +62,80 @@ async function connectDB() {
     await client.connect();
     db = client.db("smartration");
     console.log("✅ MongoDB connected");
+    // Ensure TTL index for OTPs
+    await client.db('smartration').collection('otps')
+      .createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
+    console.log("✅ OTP TTL index ensured");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
-    process.exit(1); // Exit if DB connection fails
+    process.exit(1);
   }
 }
 connectDB();
 
-// ensure TTL index for otps collection (cleanup expired OTPs)
-async function ensureOtpIndex() {
+// ─────────────────────────────────────────
+// Auth helper
+// ─────────────────────────────────────────
+function requireAdmin(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ message: 'Unauthorized' });
   try {
-    const col = client.db('smartration').collection('otps');
-    // expireAt field will be a Date; TTL index will remove docs after expireAt
-    await col.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
-    console.log('✅ OTP TTL index ensured');
-  } catch (err) {
-    console.error('Failed to ensure OTP TTL index', err);
+    jwt.verify(auth.split(' ')[1], JWT_SECRET);
+    return next();
+  } catch {
+    return res.status(401).json({ message: 'Invalid or expired token' });
   }
 }
-ensureOtpIndex();
 
-// Routes
+// ─────────────────────────────────────────
+// SMS helper (Twilio or console fallback)
+// ─────────────────────────────────────────
+async function sendSms(to, body) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken  = process.env.TWILIO_AUTH_TOKEN;
+  const from       = process.env.TWILIO_FROM;
+  if (accountSid && authToken && from) {
+    try {
+      await twilioLib(accountSid, authToken).messages.create({ body, from, to });
+      return { success: true };
+    } catch (err) {
+      console.error('Twilio error', err.message);
+      if (process.env.TWILIO_FALLBACK === 'true') {
+        console.log(`[SMS FALLBACK] to=${to}: ${body}`);
+        return { success: true, fallback: true };
+      }
+      return { success: false, error: err };
+    }
+  }
+  console.log(`[SMS LOG] to=${to}: ${body}`);
+  return { success: true, fallback: true };
+}
 
-// Search ration card by card number (GET endpoint for frontend)
+// ─────────────────────────────────────────
+// ── ROUTES ──
+// All routes MUST be defined before app.listen()
+// ─────────────────────────────────────────
+
+// Health check
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+// ── Ration card search ──
 app.get("/api/ration/search/:cardNumber", async (req, res) => {
   const { cardNumber } = req.params;
   if (!cardNumber) return res.status(400).json({ message: "Card number is required" });
-
   try {
     const card = await db.collection("rationcards").findOne({ cardNumber });
     if (!card) return res.status(404).json({ message: "Card not found" });
-
     const products = await db.collection("products").find().toArray();
-
-    const calculatedProducts = products.map(p => ({
-      productName: p.name,
-      unit: p.unit,
-      quantity: p.fixed ? p.quantityPerPerson : p.quantityPerPerson * card.familyMembers
-    }));
-
     res.json({
       cardNumber: card.cardNumber,
       name: card.holderName,
       familyMembers: card.familyMembers,
-      products: calculatedProducts
+      products: products.map(p => ({
+        productName: p.name,
+        unit: p.unit,
+        quantity: p.fixed ? p.quantityPerPerson : p.quantityPerPerson * card.familyMembers
+      }))
     });
   } catch (err) {
     console.error(err);
@@ -117,6 +143,7 @@ app.get("/api/ration/search/:cardNumber", async (req, res) => {
   }
 });
 
+// ── Debug ──
 app.get("/api/debug", async (req, res) => {
   try {
     const all = await db.collection("rationcards").find().toArray();
@@ -126,28 +153,23 @@ app.get("/api/debug", async (req, res) => {
   }
 });
 
-// Check ration card and get products
+// ── Check card ──
 app.post("/api/check-card", async (req, res) => {
   const { cardNumber } = req.body;
   if (!cardNumber) return res.status(400).json({ message: "Card number is required" });
-
   try {
     const card = await db.collection("rationcards").findOne({ cardNumber });
     if (!card) return res.status(404).json({ message: "Card not found" });
-
     const products = await db.collection("products").find().toArray();
-
-    const calculatedProducts = products.map(p => ({
-      name: p.name,
-      unit: p.unit,
-      quantity: p.fixed ? p.quantityPerPerson : p.quantityPerPerson * card.familyMembers
-    }));
-
     res.json({
       cardNumber: card.cardNumber,
       holderName: card.holderName,
       familyMembers: card.familyMembers,
-      products: calculatedProducts
+      products: products.map(p => ({
+        name: p.name,
+        unit: p.unit,
+        quantity: p.fixed ? p.quantityPerPerson : p.quantityPerPerson * card.familyMembers
+      }))
     });
   } catch (err) {
     console.error(err);
@@ -155,134 +177,54 @@ app.post("/api/check-card", async (req, res) => {
   }
 });
 
-// Issue ration for a card
+// ── Issue ration ──
 app.post("/api/issue-ration", async (req, res) => {
-  const rawCard = req.body && req.body.cardNumber;
+  const rawCard  = req.body && req.body.cardNumber;
   const products = req.body && req.body.products;
   const cardNumber = typeof rawCard === 'string' ? rawCard.trim() : rawCard;
-
-  if (!cardNumber || !Array.isArray(products) || products.length === 0) {
+  if (!cardNumber || !Array.isArray(products) || products.length === 0)
     return res.status(400).json({ message: "Card number and products are required" });
-  }
 
-  const month = new Date().toISOString().slice(0, 7); // YYYY-MM format
-
-  // Log incoming request for debugging duplicate issues
-  console.log('Issue-ration request', { cardNumber, productsLength: Array.isArray(products) ? products.length : 0, month, typeofCard: typeof cardNumber });
-
+  const month = new Date().toISOString().slice(0, 7);
   try {
-    // Try to insert directly and rely on the unique index to prevent duplicates.
-    try {
-      const insertResult = await db.collection("distributions").insertOne({
-        cardNumber,
-        month,
-        products,
-        issuedAt: new Date()
-      });
-      console.log('Ration issued', { id: insertResult.insertedId.toString(), cardNumber, month });
-      return res.json({ message: "Ration issued successfully", id: insertResult.insertedId.toString() });
-    } catch (insertErr) {
-      if (insertErr && insertErr.code === 11000) {
-        console.warn('Duplicate distribution prevented (11000) for', { cardNumber, month });
-        return res.status(400).json({ message: "Ration already issued for this month" });
-      }
-      console.error('Insert error', insertErr && insertErr.stack ? insertErr.stack : insertErr);
-      return res.status(500).json({ message: 'Server error' });
-    }
+    const insertResult = await db.collection("distributions").insertOne({
+      cardNumber, month, products, issuedAt: new Date()
+    });
+    return res.json({ message: "Ration issued successfully", id: insertResult.insertedId.toString() });
   } catch (err) {
-    console.error('Unexpected error in /api/issue-ration', err && err.stack ? err.stack : err);
-    res.status(500).json({ message: "Server error" });
+    if (err.code === 11000) return res.status(400).json({ message: "Ration already issued for this month" });
+    console.error('Issue-ration error', err);
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Get all issued rations (optional, for admin use)
-app.get("/api/distributions", async (req, res) => {
-  // Protected: require valid admin JWT in Authorization header
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Unauthorized' });
-  }
-
-  const token = auth.split(' ')[1];
-  try {
-    jwt.verify(token, JWT_SECRET);
-  } catch (err) {
-    return res.status(401).json({ message: 'Invalid or expired token' });
-  }
-
+// ── Distributions ──
+app.get("/api/distributions", requireAdmin, async (req, res) => {
   try {
     const distributions = await db.collection("distributions").find().toArray();
-    const out = distributions.map(d => ({
+    res.json(distributions.map(d => ({
       id: d._id.toString(),
       cardNumber: d.cardNumber,
       month: d.month,
       products: d.products,
       issuedAt: d.issuedAt,
       completed: !!d.completed
-    }));
-    res.json(out);
+    })));
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// Mark a distribution as completed (collection confirmed)
-app.patch('/api/distributions/:id/complete', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ message: 'Unauthorized' });
-  const token = auth.split(' ')[1];
-  try {
-    jwt.verify(token, JWT_SECRET);
-  } catch (err) {
-    return res.status(401).json({ message: 'Invalid or expired token' });
-  }
-
-  const { id } = req.params;
-  if (!id) return res.status(400).json({ message: 'Invalid id' });
-
+app.patch('/api/distributions/:id/complete', requireAdmin, async (req, res) => {
   try {
     const result = await db.collection('distributions').findOneAndUpdate(
-      { _id: new ObjectId(id) },
+      { _id: new ObjectId(req.params.id) },
       { $set: { completed: true } },
       { returnDocument: 'after' }
     );
-
     if (!result.value) return res.status(404).json({ message: 'Distribution not found' });
-
     const d = result.value;
-    res.json({ id: d._id.toString(), cardNumber: d.cardNumber, month: d.month, products: d.products, issuedAt: d.issuedAt, completed: !!d.completed });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Unmark a distribution as completed (restore if marked by mistake)
-app.patch('/api/distributions/:id/uncomplete', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ message: 'Unauthorized' });
-  const token = auth.split(' ')[1];
-  try {
-    jwt.verify(token, JWT_SECRET);
-  } catch (err) {
-    return res.status(401).json({ message: 'Invalid or expired token' });
-  }
-
-  const { id } = req.params;
-  if (!id) return res.status(400).json({ message: 'Invalid id' });
-
-  try {
-    const result = await db.collection('distributions').findOneAndUpdate(
-      { _id: new ObjectId(id) },
-      { $set: { completed: false } },
-      { returnDocument: 'after' }
-    );
-
-    if (!result.value) return res.status(404).json({ message: 'Distribution not found' });
-
-    const d = result.value;
-    console.log('Distribution unmarked completed', { id: d._id.toString(), cardNumber: d.cardNumber, month: d.month });
     res.json({ id: d._id.toString(), cardNumber: d.cardNumber, month: d.month, completed: !!d.completed });
   } catch (err) {
     console.error(err);
@@ -290,304 +232,223 @@ app.patch('/api/distributions/:id/uncomplete', async (req, res) => {
   }
 });
 
-// Admin login endpoint - returns a JWT on success
+app.patch('/api/distributions/:id/uncomplete', requireAdmin, async (req, res) => {
+  try {
+    const result = await db.collection('distributions').findOneAndUpdate(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { completed: false } },
+      { returnDocument: 'after' }
+    );
+    if (!result.value) return res.status(404).json({ message: 'Distribution not found' });
+    const d = result.value;
+    res.json({ id: d._id.toString(), cardNumber: d.cardNumber, month: d.month, completed: !!d.completed });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ── Admin login ──
 app.post('/api/admin/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ message: 'Email and password required' });
-
-  // In a real app, check hashed passwords in DB. Here we compare to env-configured creds.
   if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
     const token = jwt.sign({ role: 'admin', email }, JWT_SECRET, { expiresIn: '2h' });
     return res.json({ token });
   }
-
   return res.status(401).json({ message: 'Invalid admin credentials' });
 });
 
-// --- Admin: products and shops management ---
-// Protected routes require valid admin JWT
-function requireAdmin(req, res, next) {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ message: 'Unauthorized' });
-  const token = auth.split(' ')[1];
-  try {
-    jwt.verify(token, JWT_SECRET);
-    return next();
-  } catch (err) {
-    return res.status(401).json({ message: 'Invalid or expired token' });
-  }
-}
-
-// List products
+// ── Products ──
 app.get('/api/products', requireAdmin, async (req, res) => {
   try {
     const products = await db.collection('products').find().toArray();
     res.json(products.map(p => ({ id: p._id.toString(), ...p })));
   } catch (err) {
-    console.error('GET /api/products', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Create a new product
 app.post('/api/products', requireAdmin, async (req, res) => {
   const { name, unit, quantityPerPerson, fixed } = req.body || {};
   if (!name) return res.status(400).json({ message: 'Product name is required' });
   try {
-    const doc = {
-      name,
-      unit: unit || '',
-      quantityPerPerson: Number(quantityPerPerson) || 0,
-      fixed: !!fixed
-    };
+    const doc = { name, unit: unit || '', quantityPerPerson: Number(quantityPerPerson) || 0, fixed: !!fixed };
     const result = await db.collection('products').insertOne(doc);
     res.json({ id: result.insertedId.toString(), ...doc });
   } catch (err) {
-    console.error('POST /api/products', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Update product
 app.patch('/api/products/:id', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const updates = req.body || {};
   try {
     const result = await db.collection('products').findOneAndUpdate(
-      { _id: new ObjectId(id) },
-      { $set: updates },
+      { _id: new ObjectId(req.params.id) },
+      { $set: req.body || {} },
       { returnDocument: 'after' }
     );
     if (!result.value) return res.status(404).json({ message: 'Product not found' });
     res.json({ id: result.value._id.toString(), ...result.value });
   } catch (err) {
-    console.error('PATCH /api/products/:id', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// List shops
+// ── Shops ──
 app.get('/api/shops', requireAdmin, async (req, res) => {
   try {
     const shops = await db.collection('shops').find().toArray();
     res.json(shops.map(s => ({ id: s._id.toString(), ...s })));
   } catch (err) {
-    console.error('GET /api/shops', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Get shops that carry a specific product and the product entry in each shop
 app.get('/api/products/:id/shops', requireAdmin, async (req, res) => {
-  const { id } = req.params;
   try {
-    // Expect shops documents to have an `inventory` array with { productId, price, stock }
-    const objId = new ObjectId(id);
-    const shops = await db.collection('shops').find({ 'inventory.productId': id }).toArray();
-    // Fallback: also try matching by ObjectId within inventory
-    if (!shops.length) {
-      const shops2 = await db.collection('shops').find({ 'inventory.productId': objId }).toArray();
-      return res.json(shops2.map(s => ({ id: s._id.toString(), ...s })));
-    }
+    const { id } = req.params;
+    let shops = await db.collection('shops').find({ 'inventory.productId': id }).toArray();
+    if (!shops.length)
+      shops = await db.collection('shops').find({ 'inventory.productId': new ObjectId(id) }).toArray();
     res.json(shops.map(s => ({ id: s._id.toString(), ...s })));
   } catch (err) {
-    console.error('GET /api/products/:id/shops', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Update a product entry inside a shop's inventory
 app.patch('/api/shops/:shopId/products/:productId', requireAdmin, async (req, res) => {
-  const { shopId, productId } = req.params;
-  const updates = req.body || {};
   try {
-    // Build positional update for matching inventory item
-    const filter = { _id: new ObjectId(shopId), 'inventory.productId': productId };
+    const { shopId, productId } = req.params;
     const setObj = {};
-    Object.keys(updates).forEach(k => { setObj[`inventory.$.${k}`] = updates[k]; });
-    const result = await db.collection('shops').findOneAndUpdate(filter, { $set: setObj }, { returnDocument: 'after' });
-    if (!result.value) return res.status(404).json({ message: 'Shop or product entry not found' });
+    Object.keys(req.body || {}).forEach(k => { setObj[`inventory.$.${k}`] = req.body[k]; });
+    const result = await db.collection('shops').findOneAndUpdate(
+      { _id: new ObjectId(shopId), 'inventory.productId': productId },
+      { $set: setObj },
+      { returnDocument: 'after' }
+    );
+    if (!result.value) return res.status(404).json({ message: 'Shop or product not found' });
     res.json({ id: result.value._id.toString(), ...result.value });
   } catch (err) {
-    console.error('PATCH /api/shops/:shopId/products/:productId', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Start server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
-
-// Contact form endpoint - sends an email to configured recipient using SMTP env vars
+// ── Contact form ──
+// Priority: SMTP → SendGrid → MongoDB fallback (form NEVER returns 500 due to missing email config)
 app.post('/api/contact', async (req, res) => {
   const { name, email, phone, topic, message } = req.body || {};
-  if (!name || !email || !topic || !message) {
+  if (!name || !email || !topic || !message)
     return res.status(400).json({ message: 'Missing required fields' });
-  }
 
-  const SMTP_HOST = process.env.SMTP_HOST;
-  const SMTP_PORT = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined;
-  const SMTP_USER = process.env.SMTP_USER;
-  const SMTP_PASS = process.env.SMTP_PASS;
-  const MAIL_TO = process.env.MAIL_TO || ADMIN_EMAIL;
-  const SENDGRID_KEY = process.env.SENDGRID_API_KEY;
+  const SMTP_HOST  = process.env.SMTP_HOST;
+  const SMTP_PORT  = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
+  const SMTP_USER  = process.env.SMTP_USER;
+  const SMTP_PASS  = process.env.SMTP_PASS;
+  const MAIL_TO    = process.env.MAIL_TO || ADMIN_EMAIL;
+  const htmlBody   = `<p><strong>Name:</strong> ${name}</p>
+                      <p><strong>Email:</strong> ${email}</p>
+                      <p><strong>Phone:</strong> ${phone || '-'}</p>
+                      <p><strong>Topic:</strong> ${topic}</p>
+                      <hr/>
+                      <p>${message.replace(/\n/g, '<br/>')}</p>`;
+  const textBody   = `Name: ${name}\nEmail: ${email}\nPhone: ${phone||'-'}\nTopic: ${topic}\n\n${message}`;
+  const subject    = `[Contact] ${topic} — ${name}`;
 
-  // Prefer SMTP if configured, otherwise fall back to SendGrid API when available
+  // 1. Try SMTP
   if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
     try {
       const transporter = nodemailer.createTransport({
         host: SMTP_HOST,
-        port: SMTP_PORT || 587,
+        port: SMTP_PORT,
         secure: SMTP_PORT === 465,
         auth: { user: SMTP_USER, pass: SMTP_PASS }
       });
-
-      const mailOptions = {
-        from: SMTP_USER,
-        to: MAIL_TO,
-        replyTo: email,
-        subject: `[Contact] ${topic} — ${name}`,
-        text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone || '-'}\nTopic: ${topic}\n\nMessage:\n${message}`,
-        html: `<p><strong>Name:</strong> ${name}</p>
-               <p><strong>Email:</strong> ${email}</p>
-               <p><strong>Phone:</strong> ${phone || '-'}</p>
-               <p><strong>Topic:</strong> ${topic}</p>
-               <hr />
-               <p>${message.replace(/\n/g, '<br/>')}</p>`
-      };
-
-      await transporter.sendMail(mailOptions);
+      await transporter.sendMail({ from: SMTP_USER, to: MAIL_TO, replyTo: email, subject, text: textBody, html: htmlBody });
+      console.log('✅ Contact email sent via SMTP');
       return res.json({ message: 'Message sent' });
     } catch (err) {
-      console.error('Failed to send contact email via SMTP', err);
-      // fallthrough to attempt SendGrid if configured
+      console.error('SMTP failed:', err.message);
+      // fall through to MongoDB
     }
   }
 
-  if (SENDGRID_KEY && sendgrid) {
+  // 2. Try SendGrid
+  if (process.env.SENDGRID_API_KEY && sendgrid) {
     try {
-      sendgrid.setApiKey(SENDGRID_KEY);
-      const msg = {
-        to: MAIL_TO,
-        from: SMTP_USER || ('no-reply@' + (process.env.DOMAIN || 'localhost')),
-        subject: `[Contact] ${topic} — ${name}`,
-        text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone || '-'}\nTopic: ${topic}\n\nMessage:\n${message}`,
-        html: `<p><strong>Name:</strong> ${name}</p>
-               <p><strong>Email:</strong> ${email}</p>
-               <p><strong>Phone:</strong> ${phone || '-'}</p>
-               <p><strong>Topic:</strong> ${topic}</p>
-               <hr />
-               <p>${message.replace(/\n/g, '<br/>')}</p>`
-      };
-      await sendgrid.send(msg);
+      sendgrid.setApiKey(process.env.SENDGRID_API_KEY);
+      await sendgrid.send({ to: MAIL_TO, from: SMTP_USER || `no-reply@${process.env.DOMAIN || 'localhost'}`, subject, text: textBody, html: htmlBody });
+      console.log('✅ Contact email sent via SendGrid');
       return res.json({ message: 'Message sent' });
     } catch (err) {
-      console.error('Failed to send contact email via SendGrid', err);
-      return res.status(500).json({ message: 'Failed to send message' });
+      console.error('SendGrid failed:', err.message);
+      // fall through to MongoDB
     }
   }
 
-  console.warn('Email transport not configured. Set SMTP_* or SENDGRID_API_KEY');
-  return res.status(500).json({ message: 'Email transport not configured on server' });
+  // 3. MongoDB fallback — always succeeds so form is never broken
+  try {
+    await db.collection('contacts').insertOne({
+      name, email, phone: phone || null, topic, message, submittedAt: new Date()
+    });
+    console.warn('⚠️  No email transport — contact saved to MongoDB (contacts collection)');
+    return res.json({ message: 'Message received' });
+  } catch (dbErr) {
+    console.error('MongoDB contact save failed:', dbErr);
+    return res.status(500).json({ message: 'Failed to process your message. Please try again.' });
+  }
 });
 
-// Helper to send SMS via Twilio (if configured) or log as fallback
-async function sendSms(to, body) {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const from = process.env.TWILIO_FROM;
-  if (accountSid && authToken && from) {
-    try {
-      const clientTw = twilioLib(accountSid, authToken);
-      await clientTw.messages.create({ body, from, to });
-      return { success: true };
-    } catch (err) {
-      console.error('Twilio send error', err);
-      // If developer has explicitly enabled fallback, log and treat as success
-      if (process.env.TWILIO_FALLBACK === 'true') {
-        console.log('TWILIO_FALLBACK enabled — falling back to logging SMS instead of sending');
-        console.log(`SMS to ${to}: ${body}`);
-        return { success: true, fallback: true, error: err };
-      }
-      return { success: false, error: err };
-    }
-  }
-  // fallback: log message
-  console.log(`SMS to ${to}: ${body}`);
-  return { success: true, fallback: true };
-}
-
-// Generate 6-digit OTP
-function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-// Send OTP to phone and store in otps collection
+// ── OTP ──
 app.post('/api/send-otp', async (req, res) => {
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ message: 'Phone number is required' });
   try {
-    const code = generateOtp();
-    const now = new Date();
-    const expireAt = new Date(now.getTime() + (5 * 60 * 1000)); // 5 minutes
+    const code     = Math.floor(100000 + Math.random() * 900000).toString();
+    const now      = new Date();
+    const expireAt = new Date(now.getTime() + 5 * 60 * 1000);
     await db.collection('otps').insertOne({ phone, code, createdAt: now, expireAt, used: false });
-    const sms = `Your verification code is ${code}. It expires in 5 minutes.`;
-    const sent = await sendSms(phone, sms);
+    const sent = await sendSms(phone, `Your verification code is ${code}. It expires in 5 minutes.`);
     if (!sent.success) return res.status(500).json({ message: 'Failed to send OTP' });
     res.json({ message: 'OTP sent' });
   } catch (err) {
-    console.error('POST /api/send-otp', err);
+    console.error('send-otp error', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Verify OTP and optionally register/update user/card
 app.post('/api/verify-otp', async (req, res) => {
   const { phone, code, cardNumber } = req.body || {};
-  // allow clients to explicitly force updating card mobile when they control the phone
-  const rawForce = (req.body && req.body.force);
-  const force = rawForce === true || rawForce === 'true' || rawForce === '1';
+  const force = req.body && (req.body.force === true || req.body.force === 'true' || req.body.force === '1');
   if (!phone || !code) return res.status(400).json({ message: 'Phone and code required' });
   try {
-    // find OTP
     const otp = await db.collection('otps').findOne({ phone, code, used: false });
     if (!otp) return res.status(400).json({ message: 'Invalid or expired code' });
-    if (otp.expireAt && otp.expireAt < new Date()) return res.status(400).json({ message: 'Code expired' });
-    // mark used
+    if (otp.expireAt < new Date()) return res.status(400).json({ message: 'Code expired' });
     await db.collection('otps').updateOne({ _id: otp._id }, { $set: { used: true } });
 
-    // if cardNumber provided, link phone to rationcards if matching or empty
     if (cardNumber) {
       const card = await db.collection('rationcards').findOne({ cardNumber });
       if (!card) return res.status(404).json({ message: 'Card not found' });
-      // if card.mobile exists and differs, reject
-        // Normalize phone comparison: compare last 10 digits to allow different country code formats
-        const digits = (s) => (s || '').toString().replace(/\D/g, '');
-        const lastN = (s, n = 10) => { const d = digits(s); return d.slice(-n); };
-        if (card.mobile) {
-          if (lastN(card.mobile) !== lastN(phone)) {
-            if (force) {
-              // user proved control of the provided phone by verifying the OTP — update the card
-              await db.collection('rationcards').updateOne({ _id: card._id }, { $set: { mobile: phone } });
-              console.log('Card mobile updated via force verify', { cardNumber, phone });
-            } else {
-              return res.status(400).json({ message: 'Phone does not match card records' });
-            }
-          }
-        }
-      // update mobile if missing
-      if (!card.mobile) {
+      const lastN = (s) => (s || '').toString().replace(/\D/g, '').slice(-10);
+      if (card.mobile && lastN(card.mobile) !== lastN(phone)) {
+        if (!force) return res.status(400).json({ message: 'Phone does not match card records' });
         await db.collection('rationcards').updateOne({ _id: card._id }, { $set: { mobile: phone } });
       }
+      if (!card.mobile)
+        await db.collection('rationcards').updateOne({ _id: card._id }, { $set: { mobile: phone } });
     }
 
-    // send confirmation SMS
     await sendSms(phone, 'Verification successful. Your registration is complete.');
     res.json({ message: 'Verified' });
   } catch (err) {
-    console.error('POST /api/verify-otp', err);
+    console.error('verify-otp error', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// ─────────────────────────────────────────
+// START SERVER — always last
+// ─────────────────────────────────────────
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
