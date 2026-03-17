@@ -11,22 +11,13 @@ const twilioLib = require('twilio');
 
 const app = express();
 
-// ─────────────────────────────────────────
-// CORS — permanent, stable solution
-// Allows: production Vercel URL + any localhost port (always, no NODE_ENV check)
-// To add more origins, comma-separate them in FRONTEND_ORIGIN env var:
-//   FRONTEND_ORIGIN=https://smart-ration-two.vercel.app,https://staging.vercel.app
-// ─────────────────────────────────────────
 const rawAllowed = process.env.FRONTEND_ORIGIN || 'https://smart-ration-two.vercel.app';
 const ALLOWED_ORIGINS = rawAllowed.split(',').map(s => s.trim()).filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    // No origin = curl / server-to-server / Postman — always allow
     if (!origin) return callback(null, true);
-    // Allow any configured production origin
     if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-    // Always allow localhost on any port — for local dev without NODE_ENV tricks
     if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return callback(null, true);
     if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return callback(null, true);
     return callback(new Error(`CORS: origin ${origin} not allowed`));
@@ -36,23 +27,15 @@ app.use(cors({
   credentials: true
 }));
 
-// Handle preflight for all routes
 app.options('*', cors());
-
 app.use(express.json());
 
-// ─────────────────────────────────────────
-// Config
-// ─────────────────────────────────────────
 const ADMIN_EMAIL    = process.env.ADMIN_EMAIL    || "admin@example.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin@123";
 const JWT_SECRET     = process.env.JWT_SECRET     || "change_this_secret";
 
-// ─────────────────────────────────────────
-// MongoDB
-// ─────────────────────────────────────────
 const url = process.env.MONGO_URL || "mongodb://127.0.0.1:27017";
-if (!process.env.MONGO_URL) console.warn("⚠️  MONGO_URL not set — using local fallback");
+if (!process.env.MONGO_URL) console.warn("MONGO_URL not set — using local fallback");
 
 const client = new MongoClient(url);
 let db;
@@ -62,7 +45,6 @@ async function connectDB() {
     await client.connect();
     db = client.db("smartration");
     console.log("✅ MongoDB connected");
-    // Ensure TTL index for OTPs
     await client.db('smartration').collection('otps')
       .createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
     console.log("✅ OTP TTL index ensured");
@@ -73,9 +55,6 @@ async function connectDB() {
 }
 connectDB();
 
-// ─────────────────────────────────────────
-// Auth helper
-// ─────────────────────────────────────────
 function requireAdmin(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ message: 'Unauthorized' });
@@ -87,9 +66,6 @@ function requireAdmin(req, res, next) {
   }
 }
 
-// ─────────────────────────────────────────
-// SMS helper (Twilio or console fallback)
-// ─────────────────────────────────────────
 async function sendSms(to, body) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken  = process.env.TWILIO_AUTH_TOKEN;
@@ -111,12 +87,7 @@ async function sendSms(to, body) {
   return { success: true, fallback: true };
 }
 
-// ─────────────────────────────────────────
-// ── ROUTES ──
-// All routes MUST be defined before app.listen()
-// ─────────────────────────────────────────
-
-// Health check
+// ── Health check ──
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // ── Ration card search ──
@@ -184,7 +155,6 @@ app.post("/api/issue-ration", async (req, res) => {
   const cardNumber = typeof rawCard === 'string' ? rawCard.trim() : rawCard;
   if (!cardNumber || !Array.isArray(products) || products.length === 0)
     return res.status(400).json({ message: "Card number and products are required" });
-
   const month = new Date().toISOString().slice(0, 7);
   try {
     const insertResult = await db.collection("distributions").insertOne({
@@ -335,61 +305,60 @@ app.patch('/api/shops/:shopId/products/:productId', requireAdmin, async (req, re
 });
 
 // ── Contact form ──
-// Priority: SMTP → SendGrid → MongoDB fallback (form NEVER returns 500 due to missing email config)
+// Priority: Brevo SMTP → SendGrid → MongoDB fallback
 app.post('/api/contact', async (req, res) => {
   const { name, email, phone, topic, message } = req.body || {};
   if (!name || !email || !topic || !message)
     return res.status(400).json({ message: 'Missing required fields' });
 
-  const SMTP_HOST  = process.env.SMTP_HOST;
-  const SMTP_PORT  = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
-  const SMTP_USER  = process.env.SMTP_USER;
-  const SMTP_PASS  = process.env.SMTP_PASS;
-  const MAIL_TO    = process.env.MAIL_TO || ADMIN_EMAIL;
-  const htmlBody   = `<p><strong>Name:</strong> ${name}</p>
-                      <p><strong>Email:</strong> ${email}</p>
-                      <p><strong>Phone:</strong> ${phone || '-'}</p>
-                      <p><strong>Topic:</strong> ${topic}</p>
-                      <hr/>
-                      <p>${message.replace(/\n/g, '<br/>')}</p>`;
-  const textBody   = `Name: ${name}\nEmail: ${email}\nPhone: ${phone||'-'}\nTopic: ${topic}\n\n${message}`;
-  const subject    = `[Contact] ${topic} — ${name}`;
+  const SMTP_HOST = process.env.SMTP_HOST;
+  const SMTP_USER = process.env.SMTP_USER;
+  const SMTP_PASS = process.env.SMTP_PASS;
+  const MAIL_TO   = process.env.MAIL_TO || ADMIN_EMAIL;
+  const htmlBody  = `<p><strong>Name:</strong> ${name}</p>
+                     <p><strong>Email:</strong> ${email}</p>
+                     <p><strong>Phone:</strong> ${phone || '-'}</p>
+                     <p><strong>Topic:</strong> ${topic}</p>
+                     <hr/>
+                     <p>${message.replace(/\n/g, '<br/>')}</p>`;
+  const textBody  = `Name: ${name}\nEmail: ${email}\nPhone: ${phone||'-'}\nTopic: ${topic}\n\n${message}`;
+  const subject   = `[Contact] ${topic} — ${name}`;
 
-  // 1. Try Gmail (service mode — works on Render, bypasses port blocking)
-  if (SMTP_USER && SMTP_PASS) {
+  // 1. Brevo SMTP — works on Render (no port blocking unlike Gmail)
+  if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
     try {
       const transporter = nodemailer.createTransport({
-        service: 'gmail',
+        host: SMTP_HOST,
+        port: 587,
+        secure: false,
         auth: { user: SMTP_USER, pass: SMTP_PASS }
       });
       await transporter.sendMail({ from: SMTP_USER, to: MAIL_TO, replyTo: email, subject, text: textBody, html: htmlBody });
-      console.log('✅ Contact email sent via Gmail');
+      console.log('✅ Contact email sent via Brevo SMTP');
       return res.json({ message: 'Message sent' });
     } catch (err) {
-      console.error('Gmail failed:', err.message);
-      // fall through to MongoDB
+      console.error('Brevo SMTP failed:', err.message);
     }
   }
 
-  // 2. Try SendGrid
+  // 2. SendGrid fallback
   if (process.env.SENDGRID_API_KEY && sendgrid) {
     try {
       sendgrid.setApiKey(process.env.SENDGRID_API_KEY);
-      await sendgrid.send({ to: MAIL_TO, from: SMTP_USER || `no-reply@${process.env.DOMAIN || 'localhost'}`, subject, text: textBody, html: htmlBody });
+      await sendgrid.send({ to: MAIL_TO, from: SMTP_USER || `no-reply@localhost`, subject, text: textBody, html: htmlBody });
       console.log('✅ Contact email sent via SendGrid');
       return res.json({ message: 'Message sent' });
     } catch (err) {
       console.error('SendGrid failed:', err.message);
-      // fall through to MongoDB
     }
   }
 
-  // 3. MongoDB fallback — always succeeds so form is never broken
+  // 3. MongoDB fallback — form never fails
   try {
     await db.collection('contacts').insertOne({
       name, email, phone: phone || null, topic, message, submittedAt: new Date()
     });
-    console.warn('⚠️  No email transport — contact saved to MongoDB (contacts collection)');
+    console.warn('⚠️  No email transport — contact saved to MongoDB');
     return res.json({ message: 'Message received' });
   } catch (dbErr) {
     console.error('MongoDB contact save failed:', dbErr);
@@ -445,8 +414,6 @@ app.post('/api/verify-otp', async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────
-// START SERVER — always last
-// ─────────────────────────────────────────
+// ── START SERVER ──
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
