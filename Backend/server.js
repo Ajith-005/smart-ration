@@ -4,9 +4,6 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ObjectId } = require("mongodb");
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
-let sendgrid = null;
-try { sendgrid = require('@sendgrid/mail'); } catch (e) { /* optional */ }
 const twilioLib = require('twilio');
 
 const app = express();
@@ -85,6 +82,39 @@ async function sendSms(to, body) {
   }
   console.log(`[SMS LOG] to=${to}: ${body}`);
   return { success: true, fallback: true };
+}
+
+// ── Send email via Brevo HTTP API (no SMTP, works on Render free tier) ──
+async function sendEmailBrevo({ to, replyTo, subject, textBody, htmlBody }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) return { success: false, error: 'BREVO_API_KEY not set' };
+
+  const senderEmail = process.env.SMTP_USER || process.env.MAIL_TO || ADMIN_EMAIL;
+
+  const payload = {
+    sender:   { name: 'Smart Ration', email: senderEmail },
+    to:       [{ email: to }],
+    replyTo:  { email: replyTo },
+    subject,
+    textContent: textBody,
+    htmlContent: htmlBody
+  };
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': apiKey
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Brevo API error ${response.status}: ${err}`);
+  }
+
+  return { success: true };
 }
 
 // ── Health check ──
@@ -305,55 +335,34 @@ app.patch('/api/shops/:shopId/products/:productId', requireAdmin, async (req, re
 });
 
 // ── Contact form ──
-// Priority: Brevo SMTP → SendGrid → MongoDB fallback
+// Uses Brevo HTTP API — no SMTP, works on Render free tier
 app.post('/api/contact', async (req, res) => {
   const { name, email, phone, topic, message } = req.body || {};
   if (!name || !email || !topic || !message)
     return res.status(400).json({ message: 'Missing required fields' });
 
-  const SMTP_HOST = process.env.SMTP_HOST;
-  const SMTP_USER = process.env.SMTP_USER;
-  const SMTP_PASS = process.env.SMTP_PASS;
-  const MAIL_TO   = process.env.MAIL_TO || ADMIN_EMAIL;
-  const htmlBody  = `<p><strong>Name:</strong> ${name}</p>
-                     <p><strong>Email:</strong> ${email}</p>
-                     <p><strong>Phone:</strong> ${phone || '-'}</p>
-                     <p><strong>Topic:</strong> ${topic}</p>
-                     <hr/>
-                     <p>${message.replace(/\n/g, '<br/>')}</p>`;
-  const textBody  = `Name: ${name}\nEmail: ${email}\nPhone: ${phone||'-'}\nTopic: ${topic}\n\n${message}`;
-  const subject   = `[Contact] ${topic} — ${name}`;
+  const MAIL_TO  = process.env.MAIL_TO || ADMIN_EMAIL;
+  const htmlBody = `<p><strong>Name:</strong> ${name}</p>
+                    <p><strong>Email:</strong> ${email}</p>
+                    <p><strong>Phone:</strong> ${phone || '-'}</p>
+                    <p><strong>Topic:</strong> ${topic}</p>
+                    <hr/>
+                    <p>${message.replace(/\n/g, '<br/>')}</p>`;
+  const textBody = `Name: ${name}\nEmail: ${email}\nPhone: ${phone||'-'}\nTopic: ${topic}\n\n${message}`;
+  const subject  = `[Contact] ${topic} — ${name}`;
 
-  // 1. Brevo SMTP — works on Render (no port blocking unlike Gmail)
-  if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+  // 1. Brevo HTTP API — works on Render (HTTPS port 443, never blocked)
+  if (process.env.BREVO_API_KEY) {
     try {
-      const transporter = nodemailer.createTransport({
-        host: SMTP_HOST,
-        port: 587,
-        secure: false,
-        auth: { user: SMTP_USER, pass: SMTP_PASS }
-      });
-      await transporter.sendMail({ from: SMTP_USER, to: MAIL_TO, replyTo: email, subject, text: textBody, html: htmlBody });
-      console.log('✅ Contact email sent via Brevo SMTP');
+      await sendEmailBrevo({ to: MAIL_TO, replyTo: email, subject, textBody, htmlBody });
+      console.log('✅ Contact email sent via Brevo API');
       return res.json({ message: 'Message sent' });
     } catch (err) {
-      console.error('Brevo SMTP failed:', err.message);
+      console.error('Brevo API failed:', err.message);
     }
   }
 
-  // 2. SendGrid fallback
-  if (process.env.SENDGRID_API_KEY && sendgrid) {
-    try {
-      sendgrid.setApiKey(process.env.SENDGRID_API_KEY);
-      await sendgrid.send({ to: MAIL_TO, from: SMTP_USER || `no-reply@localhost`, subject, text: textBody, html: htmlBody });
-      console.log('✅ Contact email sent via SendGrid');
-      return res.json({ message: 'Message sent' });
-    } catch (err) {
-      console.error('SendGrid failed:', err.message);
-    }
-  }
-
-  // 3. MongoDB fallback — form never fails
+  // 2. MongoDB fallback — form never fails
   try {
     await db.collection('contacts').insertOne({
       name, email, phone: phone || null, topic, message, submittedAt: new Date()
