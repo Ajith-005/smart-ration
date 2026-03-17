@@ -12,15 +12,37 @@ const twilioLib = require('twilio');
 const app = express();
 
 // Middleware
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'https://smart-ration-two.vercel.app';
-app.use(cors({ origin: FRONTEND_ORIGIN, methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
-app.options('*', cors());
+// FRONTEND_ORIGIN may be a single origin or a comma-separated list (for dev+prod)
+const rawAllowed = process.env.FRONTEND_ORIGIN || 'https://smart-ration-two.vercel.app';
+const ALLOWED_ORIGINS = rawAllowed.split(',').map(s => s.trim()).filter(Boolean);
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (curl, server-to-server)
+    if (!origin) return callback(null, true);
+    // Allow configured origins
+    if (ALLOWED_ORIGINS.indexOf(origin) !== -1) return callback(null, true);
+    // Allow localhost during development automatically
+    if (origin.startsWith('http://localhost') || origin.startsWith('https://localhost')) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
+  const origin = req.headers.origin;
+  if (origin && (ALLOWED_ORIGINS.indexOf(origin) !== -1 || origin.startsWith('http://localhost') || origin.startsWith('https://localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   next();
 });
+
 app.use(express.json());
 
 // Admin credentials & JWT secret from env (with safe defaults)
