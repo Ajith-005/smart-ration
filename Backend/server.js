@@ -5,6 +5,8 @@ const cors = require("cors");
 const { MongoClient, ObjectId } = require("mongodb");
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+let sendgrid = null;
+try { sendgrid = require('@sendgrid/mail'); } catch (e) { /* optional */ }
 const twilioLib = require('twilio');
 
 const app = express();
@@ -397,43 +399,65 @@ app.post('/api/contact', async (req, res) => {
   const SMTP_USER = process.env.SMTP_USER;
   const SMTP_PASS = process.env.SMTP_PASS;
   const MAIL_TO = process.env.MAIL_TO || ADMIN_EMAIL;
+  const SENDGRID_KEY = process.env.SENDGRID_API_KEY;
 
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    console.warn('SMTP not configured. Please set SMTP_HOST, SMTP_USER, SMTP_PASS');
-    return res.status(500).json({ message: 'Email transport not configured on server' });
+  // Prefer SMTP if configured, otherwise fall back to SendGrid API when available
+  if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: SMTP_HOST,
+        port: SMTP_PORT || 587,
+        secure: SMTP_PORT === 465,
+        auth: { user: SMTP_USER, pass: SMTP_PASS }
+      });
+
+      const mailOptions = {
+        from: SMTP_USER,
+        to: MAIL_TO,
+        replyTo: email,
+        subject: `[Contact] ${topic} — ${name}`,
+        text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone || '-'}\nTopic: ${topic}\n\nMessage:\n${message}`,
+        html: `<p><strong>Name:</strong> ${name}</p>
+               <p><strong>Email:</strong> ${email}</p>
+               <p><strong>Phone:</strong> ${phone || '-'}</p>
+               <p><strong>Topic:</strong> ${topic}</p>
+               <hr />
+               <p>${message.replace(/\n/g, '<br/>')}</p>`
+      };
+
+      await transporter.sendMail(mailOptions);
+      return res.json({ message: 'Message sent' });
+    } catch (err) {
+      console.error('Failed to send contact email via SMTP', err);
+      // fallthrough to attempt SendGrid if configured
+    }
   }
 
-  try {
-    const transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT || 587,
-      secure: SMTP_PORT === 465, // true for 465, false for other ports
-      auth: {
-        user: SMTP_USER,
-        pass: SMTP_PASS
-      }
-    });
-
-    const mailOptions = {
-      from: SMTP_USER,
-      to: MAIL_TO,
-      replyTo: email,
-      subject: `[Contact] ${topic} — ${name}`,
-      text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone || '-'}\nTopic: ${topic}\n\nMessage:\n${message}`,
-      html: `<p><strong>Name:</strong> ${name}</p>
-             <p><strong>Email:</strong> ${email}</p>
-             <p><strong>Phone:</strong> ${phone || '-'}</p>
-             <p><strong>Topic:</strong> ${topic}</p>
-             <hr />
-             <p>${message.replace(/\n/g, '<br/>')}</p>`
-    };
-
-    await transporter.sendMail(mailOptions);
-    res.json({ message: 'Message sent' });
-  } catch (err) {
-    console.error('Failed to send contact email', err);
-    res.status(500).json({ message: 'Failed to send message' });
+  if (SENDGRID_KEY && sendgrid) {
+    try {
+      sendgrid.setApiKey(SENDGRID_KEY);
+      const msg = {
+        to: MAIL_TO,
+        from: SMTP_USER || ('no-reply@' + (process.env.DOMAIN || 'localhost')),
+        subject: `[Contact] ${topic} — ${name}`,
+        text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone || '-'}\nTopic: ${topic}\n\nMessage:\n${message}`,
+        html: `<p><strong>Name:</strong> ${name}</p>
+               <p><strong>Email:</strong> ${email}</p>
+               <p><strong>Phone:</strong> ${phone || '-'}</p>
+               <p><strong>Topic:</strong> ${topic}</p>
+               <hr />
+               <p>${message.replace(/\n/g, '<br/>')}</p>`
+      };
+      await sendgrid.send(msg);
+      return res.json({ message: 'Message sent' });
+    } catch (err) {
+      console.error('Failed to send contact email via SendGrid', err);
+      return res.status(500).json({ message: 'Failed to send message' });
+    }
   }
+
+  console.warn('Email transport not configured. Set SMTP_* or SENDGRID_API_KEY');
+  return res.status(500).json({ message: 'Email transport not configured on server' });
 });
 
 // Helper to send SMS via Twilio (if configured) or log as fallback
